@@ -1,36 +1,50 @@
 'use strict';
 
-/**
- * Bootstrap phase of the plugin
- * This is called after all plugins are registered and loaded
- * Use this to set up lifecycle hooks and initialize the plugin
- */
 module.exports = async ({ strapi }) => {
-  try {
-    // Get plugin configuration
-    const config = strapi.config.get('plugin.audit-log', {
-      enabled: true,
-      excludeContentTypes: [],
-      excludeFields: ['password', 'resetPasswordToken', 'confirmationToken'],
+  const enabled = strapi.config.get('plugin.audit-log.enabled', true);
+  const excluded = strapi.config.get('plugin.audit-log.excludeContentTypes', []);
+
+  if (!enabled) return;
+
+  const contentTypes = Object.keys(strapi.contentTypes).filter(
+    uid => !excluded.includes(uid)
+  );
+
+  for (const uid of contentTypes) {
+    const model = strapi.contentTypes[uid];
+
+    strapi.db.lifecycles.subscribe({
+      models: [uid],
+      afterCreate(event) {
+        const { result, params } = event;
+        strapi.plugin('audit-log').service('auditLog').logAction({
+          action: 'create',
+          contentType: uid,
+          recordId: result.id.toString(),
+          userId: params.user?.id,
+          changes: result,
+        });
+      },
+      afterUpdate(event) {
+        const { result, params } = event;
+        strapi.plugin('audit-log').service('auditLog').logAction({
+          action: 'update',
+          contentType: uid,
+          recordId: result.id.toString(),
+          userId: params.user?.id,
+          changes: result,
+        });
+      },
+      afterDelete(event) {
+        const { result, params } = event;
+        strapi.plugin('audit-log').service('auditLog').logAction({
+          action: 'delete',
+          contentType: uid,
+          recordId: result.id.toString(),
+          userId: params.user?.id,
+          changes: result,
+        });
+      },
     });
-
-    // Check if audit logging is enabled
-    if (!config.enabled) {
-      strapi.log.info('[Audit Log] Plugin is disabled via configuration');
-      return;
-    }
-
-    // Get the lifecycle hooks middleware
-    const lifecycleMiddleware = strapi.plugin('audit-log').middleware('lifecycleHooks');
-
-    // Register lifecycle hooks for all content types
-    const registeredCount = lifecycleMiddleware.registerAll();
-
-    // Log successful initialization
-    strapi.log.info('[Audit Log] Plugin initialized successfully');
-    strapi.log.info(`[Audit Log] Monitoring ${registeredCount} content types for changes`);
-  } catch (error) {
-    strapi.log.error('[Audit Log] Failed to bootstrap plugin:', error);
-    throw error;
   }
 };
